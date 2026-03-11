@@ -1,7 +1,12 @@
-#include "Server.hpp"
+#include <unistd.h>
+#include <iostream>
+#include <string>
+#include <set>
+#include <time.h>
+#include <ctime>
+#include <sys/socket.h>
 
 class Channel;
-class Server;
 
 class Client
 {
@@ -23,9 +28,7 @@ class Client
         bool _userOk;
         bool _registered;
 
-        std::set<std::string> _channels;
-        
-        time_t _lastActivity;
+        std::set<Channel *> _channels;
 
     public:
         Client(int fd, const std::string& ip, int port);
@@ -36,8 +39,9 @@ class Client
         const std::string& getUsername() const;
         const std::string& getRealname() const;
         const std::string& getHostname() const;
-        const std::string& getPrefix() const; // nick!user@host
+        const std::string  getPrefix(); // nick!user@host
         const std::string& getSendBuffer() const;
+        std::string& getRecvBuffer();
         bool isRegistered() const;
 
         void setNickname(const std::string& nick);
@@ -46,19 +50,22 @@ class Client
         void setPassOk(bool ok);
         void setNickOk(bool ok);
         void setUserOk(bool ok);
+        void setRegistered(bool ok);
+
+        bool isPassOk() const;
 
         void appendToRecvBuffer(const std::string& data);
         void appendToSendBuffer(const std::string& data);
         bool hasCompleteCommand() const;
         std::string extractCommand();
         void clearSentData(size_t bytes);
+        void clearBuffer();
 
         std::string makeReply(const std::string& code, const std::string& target, const std::string& message);
         void        sendMessage(const std::string& message);
 
-        void addChannel(const std::string& channel);
-        void removeChannel(const std::string& channel);
-        bool isInChannel(const std::string& channel) const;
+        void addChannel(Channel *channel);
+        void removeChannel(Channel *channel);
+        bool isInChannel(Channel *channel) const;
 
-        void checkRegistration();
 };

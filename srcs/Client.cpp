@@ -1,4 +1,5 @@
 #include "../includes/Client.hpp"
+#include "../includes/Channel.hpp"
 
 Client::Client(int fd, const std::string& ip, int port)
 {
@@ -56,30 +57,29 @@ void Client::clearSentData(size_t bytes)
         _sendBuffer.erase(0, bytes);
 }
 
+void Client::clearBuffer()
+{
+    _recvBuffer.clear();
+}
+
 /* ================= CHANNEL ================= */
 
-void Client::addChannel(const std::string& channel)
+void Client::addChannel(Channel *channel)
 {
     _channels.insert(channel);
 }
 
-void Client::removeChannel(const std::string& channel)
+void Client::removeChannel(Channel *channel)
 {
     _channels.erase(channel);
 }
 
-bool Client::isInChannel(const std::string& channel) const
+bool Client::isInChannel(Channel *channel) const
 {
     return (_channels.find(channel) != _channels.end());
 }
 
 /* ================= GETTERS ================= */
-
-void Client::checkRegistration()
-{
-    if (!_registered && _passOk && _userOk && _nickOk)
-        _registered = true;
-}
 
 int Client::getFd() const
 {
@@ -106,7 +106,7 @@ const std::string& Client::getHostname() const
     return _hostname;
 }
 
-const std::string& Client::getPrefix() const
+const std::string Client::getPrefix()
 {
     // Format IRC standard : nick!user@host
     return _nickname + "!" + _username + "@" + _hostname;
@@ -117,11 +117,20 @@ const std::string& Client::getSendBuffer() const
     return _sendBuffer;
 }
 
+std::string& Client::getRecvBuffer()
+{
+    return _recvBuffer;
+}
+
 bool Client::isRegistered() const
 {
     return _registered;
 }
 
+bool Client::isPassOk() const
+{
+    return _passOk;
+}
 
 /* ================= SETTERS ================= */
 
@@ -156,6 +165,11 @@ void Client::setUserOk(bool ok)
     _userOk = ok;
 }
 
+void Client::setRegistered(bool ok)
+{
+    _registered = ok;
+}
+
 std::string Client::makeReply(const std::string& code, const std::string& target, const std::string& message)
 {
     return ":" + _nickname + " " + code + " " + target + " :" + message;
@@ -171,5 +185,13 @@ void Client::sendMessage(const std::string& message)
     if (msg.find("\r\n") == std::string::npos)
         msg += "\r\n";
 
-    send(_fd, msg.c_str(), msg.size(), 0);
+    size_t total = 0;
+
+    while (total < msg.size())
+    {
+        ssize_t sent = send(_fd, msg.c_str() + total, msg.size() - total, 0);
+        if (sent <= 0)
+            break;
+        total += sent;
+    }
 }

@@ -1,4 +1,5 @@
 #include "../includes/Channel.hpp"
+#include "../includes/Client.hpp"
 
 Channel::Channel(const std::string& name) : _name(name) {}
 
@@ -37,7 +38,7 @@ const size_t& Channel::getUserLimit() const
     return _userLimit;
 }
 
-const size_t& Channel::getMemberCount() const
+size_t Channel::getMemberCount() const
 {
     return _members.size();
 }
@@ -124,11 +125,11 @@ void Channel::addMember(Client* client)
     if (_members.find(fd) != _members.end())
         return;
 
-    _members[fd] = client;
-    client->addChannel(_name);
-
-    if (_members.size() == 1)
+    if (_operators.empty())
         _operators.insert(fd);
+
+    _members[fd] = client;
+    client->addChannel(this);
 }
 
 void Channel::removeMember(Client* client)
@@ -139,6 +140,14 @@ void Channel::removeMember(Client* client)
     int fd = client->getFd();
     
     _members.erase(fd);
+    _operators.erase(fd);
+    client->removeChannel(this);
+
+    if (_operators.empty() && !_members.empty())
+    {
+        int newOp = _members.begin()->first;
+        _operators.insert(newOp);
+    }
 }
 
 bool Channel::isMember(Client* client) const
@@ -206,4 +215,52 @@ bool Channel::canJoin(Client* client, const std::string& key) const
         return false;
 
     return true;
+}
+
+bool Channel::canSpeak(Client* client) const
+{
+    int fd = client->getFd();
+
+    if (_members.find(fd) == _members.end())
+        return false;
+
+    if (!_moderated)
+        return true;
+
+    if (_operators.find(fd) != _operators.end())
+        return true;
+    
+    return false;
+}
+
+bool Channel::isFull() const
+{
+    if (_hasLimit)
+    {
+        if (_members.size() >= _userLimit)
+        return true;
+    }
+    return false;
+}
+
+bool Channel::canChangeTopic(Client* client) const
+{
+    if (_topicRestricted)
+    {
+        if (isOperator(client->getFd()))
+            return true;
+        return false;
+    }
+    return true;
+}
+
+void Channel::broadcast(const std::string& message, Client* sender)
+{
+    for (std::map<int, Client*>::iterator it = _members.begin();
+         it != _members.end();
+         ++it)
+    {
+        if (it->second != sender)
+            it->second->sendMessage(message);
+    }
 }

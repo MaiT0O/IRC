@@ -1,22 +1,131 @@
 #include "../includes/Server.hpp"
-#include <sys/socket.h>
-#include <fcntl.h>
-#include <unistd.h>
+#include "../includes/replies.hpp"
+#include "../includes/utils.hpp"
+#include "../includes/Message.hpp"
+#include "../includes/Client.hpp"
+#include "../includes/Channel.hpp"
 
 Server::Server(int _port, std::string _password)
 {
     this->_port = _port;
     this->_password = _password;
     initSocket();
+    run();
 }
 
 Server::~Server()
 {
 
 }
+
+void Server::sendReply(int fd, std::string code, std::string message)
+{
+    std::string nick = _clients[fd]->getNickname();
+    if(nick.empty())
+        nick = "*";
+    std::string _reply = ":" + this->_name + " " + code + " " + nick + " :" + message + "\r\n";
+    send(fd, _reply.c_str(), _reply.size(), 0);
+}
+
+void Server::acceptClient()
+{
+    sockaddr_in addr;
+    socklen_t len = sizeof(addr);
+
+    int _fdclient = accept(_fdserver, (sockaddr*)&addr, &len);
+    if(_fdclient  == -1)
+        return;
+    if(fcntl(_fdclient, F_SETFL, O_NONBLOCK) == -1)
+        throw std::runtime_error("Failed to set non-blocking mode on client fd");
+
+    std::string ip = inet_ntoa(addr.sin_addr);
+    int port = ntohs(addr.sin_port);
+
+    Client* client = new Client(_fdclient, ip, port);
+    this->_clients.insert(std::make_pair(_fdclient, client));
+    
+    pollfd clientPollfd;
+
+        clientPollfd.fd = _fdclient;
+        clientPollfd.events = POLLIN;
+        clientPollfd.revents = 0;
+    _pollfd.push_back(clientPollfd);
+}
+
+void Server::disconnectClient(int fd)
+{
+    for (std::map<std::string, Channel *>::iterator it = _channels.begin(); it != _channels.end(); ++it)
+    {
+        it->second->removeMember(_clients[fd]);
+    }
+
+    for(size_t i = 0; i < _pollfd.size(); i++)
+    {
+        if(_pollfd[i].fd == fd)
+        {
+            _pollfd.erase(_pollfd.begin() + i);
+            break;
+        }
+    }
+    delete _clients[fd];
+    _clients.erase(fd);
+    close(fd);
+}
+
+void Server::handleClient(int fd)
+{
+    char buffer[512];
+    int bytesRead = recv(fd, buffer, 511, 0);
+
+    if(bytesRead == 0)
+    {
+        disconnectClient(fd);
+        return;
+    }
+    else if(bytesRead < 0)
+        return;
+
+    buffer[bytesRead] = '\0';
+    _clients[fd]->appendToRecvBuffer(buffer);
+
+    if(_clients[fd]->getRecvBuffer().size() > 510
+        && _clients[fd]->getRecvBuffer().find("\r\n") == std::string::npos)
+    {
+        _clients[fd]->clearBuffer();
+        return;
+    }
+
+    size_t pos;
+    while((pos = _clients[fd]->getRecvBuffer().find("\r\n")) != std::string::npos)
+    {
+        if(pos > 510)
+        {
+            _clients[fd]->getRecvBuffer().erase(0, pos + 2);
+            continue;
+        }
+        std::string command = _clients[fd]->getRecvBuffer().substr(0, pos);
+        _clients[fd]->getRecvBuffer().erase(0, pos + 2);
+        processCommand(fd, command);
+    }
+}
+
 void Server::run()
 {
-
+    while(true)
+    {
+         int ready = poll(_pollfd.data(), _pollfd.size(), -1);
+         if(ready == -1)
+            throw std::runtime_error("Poll failed");
+        for(size_t i = 0; i < _pollfd.size(); i++)
+        {
+            if(_pollfd[i].revents == 0)
+                continue;
+            if(_pollfd[i].fd == _fdserver)
+                acceptClient();
+            else
+                handleClient(_pollfd[i].fd);
+        }
+    }
 }
 
 void Server::stop()
@@ -31,14 +140,62 @@ void Server::initSocket()
         throw std::runtime_error("Failed to create socket");
     this->_fdserver = serverSocket;
     int opt = 1;
-    if(setsockopt(_fdserver, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt) == -1))
+    if(setsockopt(_fdserver, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) == -1)
         throw std::runtime_error("Failed to set socker options");
     if(fcntl(_fdserver, F_SETFL, O_NONBLOCK) == -1)
         throw std::runtime_error("Failed to set non-blocking mode");
+
     sockaddr_in serverAddr;
       serverAddr.sin_family = AF_INET;
       serverAddr.sin_port = htons(_port);
       serverAddr.sin_addr.s_addr = INADDR_ANY;
-    
-    if(bind(_fdserver, (sockaddr*)&serverAddr, sizeof(serverAddr)))
+
+    if(bind(_fdserver, (sockaddr*)&serverAddr, sizeof(serverAddr)) == -1)
+        throw std::runtime_error("Failed to bind socket ");
+    if(listen(_fdserver, 10) == -1 )
+        throw std::runtime_error("Failed to listen on socket ");
+
+    pollfd serverPollfd;
+
+      serverPollfd.fd = _fdserver;
+      serverPollfd.events = POLLIN;
+      serverPollfd.revents = 0;
+    _pollfd.push_back(serverPollfd);
+
+}
+
+// Getters
+int Server::getPort() const
+{
+    return this->_port;
+}
+
+std::string Server::getPassword() const
+{
+    return this->_password;
+}
+
+int Server::getFdServer() const
+{
+    return this->_fdserver;
+}
+
+std::string Server::getName() const
+{
+    return this->_name;
+}
+
+std::vector<pollfd>& Server::getPollfd()
+{
+    return this->_pollfd;
+}
+
+std::map<int, Client*>& Server::getClients()
+{
+    return this->_clients;
+}
+
+std::map<std::string, Channel*>& Server::getChannels()
+{
+    return this->_channels;
 }

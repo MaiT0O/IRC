@@ -1,6 +1,7 @@
 #ifndef SERVER_HPP
 #define SERVER_HPP
 
+#include <unistd.h>
 #include <iostream>
 #include <vector>
 #include <string>
@@ -12,8 +13,10 @@
 #include <time.h>
 #include <ctime>
 #include <sys/socket.h>
-#include "Message.hpp"
-#include "Client.hpp"
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <cctype>
+#include <cstdlib>
 
 class Client;
 class Channel;
@@ -35,7 +38,11 @@ class Server
         void acceptClient();
         void handleClient(int fd);
         void disconnectClient(int fd);
-        
+        void processCommand(int fd, std::string command);
+        void handlePass(int fd, std::vector<std::string> params);
+        void handleNick(int fd, std::vector<std::string> params);
+        void handleUser(int fd, std::vector<std::string> params);
+        void sendReply(int fd, std::string code, std::string message);
     public:
         Server(int _port, std::string _password);
         ~Server();
@@ -43,5 +50,13 @@ class Server
         void run();
         void stop();
 
+        // Getters
+        int getPort() const;
+        std::string getPassword() const;
+        int getFdServer() const;
+        std::string getName() const;
+        std::vector<pollfd>& getPollfd();
+        std::map<int, Client*>& getClients();
+        std::map<std::string, Channel*>& getChannels();
 };
 #endif
